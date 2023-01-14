@@ -50,7 +50,7 @@ let rec eval_expr (env : value env) (e : expr) : value =
         let v1 = eval_expr env e1
         eval_expr ((x, v1) :: env) e2
 
-    // TODO: test this is ok or fix it
+    // TODO: test this is ok or fix it - DONE
     | LetRec (f, _, e1, e2) -> 
         let v1 = eval_expr env e1
         match v1 with
@@ -60,8 +60,9 @@ let rec eval_expr (env : value env) (e : expr) : value =
                 eval_expr ((f, rec_closure) :: env) e2
         
         | _ -> unexpected_error "eval_expr: expected closure in rec binding but got: %s" (pretty_value v1)
-        // TODO finish this implementation
+        // TODO finish this implementation - DONE
     
+    // ops DONE
     | UnOp ("not", e1) -> 
         let v = eval_expr env e1 
         in 

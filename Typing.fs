@@ -11,14 +11,36 @@ let type_error fmt = throw_formatted TypeError fmt
 
 type subst = (tyvar * ty) list
 
-// TODO implement this
-let unify (t1 : ty) (t2 : ty) : subst = []
+// TODO implement this - DONE
+let rec apply_subst (t : ty) (s : subst) : ty =
+    match t with
+    | TyName(_) -> t
+    | TyArrow(dom, codom) -> TyArrow(apply_subst dom s,apply_subst codom s)
+    | TyTuple(tuple) -> TyTuple(List.map (fun x -> apply_subst x s) tuple)
+    | TyVar(v) -> 
+        let substituted_type_opt = List.tryFind (fun (var, _) -> var = v) s 
+        in
+            match substituted_type_opt with 
+            | Some (_, substituted_type) -> substituted_type
+            | None -> t
+
+// TODO implement this - DONE (apart from duplicit domain records - mentioned in lecture 20)
+let rec compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
+    match subs_list2 with
+    | [] -> subs_list1
+    | (sub2 :: remainig_subs2) ->
+        let (v2, ty2) = sub2
+        let new_sub_ty2 = apply_subst ty2 subs_list1
+        in 
+            ((v2, new_sub_ty2) :: (compose_subst subs_list1 remainig_subs2))
 
 // TODO implement this
-let apply_subst (t : ty) (s : subst) : ty = t
-
-// TODO implement this
-let compose_subst (s1 : subst) (s2 : subst) : subst = s1 @ s2
+let unify (t1 : ty) (t2 : ty) : subst =
+    match t1, t2 with
+    | TyName (n1), TyName (n2) -> if n1 = n2 then [] else type_error "type error: failed to unify type %s and %s" n1 n2
+    | TyName (_), TyVar (v2) -> [(v2, t1)]
+    | TyVar (v1), TyName (_) -> [(v1, t2)]
+    // todo 
 
 let rec freevars_ty (t : ty) : tyvar Set =
     match t with
