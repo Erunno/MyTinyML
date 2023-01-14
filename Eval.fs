@@ -7,6 +7,11 @@ module TinyML.Eval
 
 open Ast
 
+type opFunction = 
+    | NumToNum of (float -> float -> float) * (int -> int -> int)
+    | NumToBool of (float -> float -> bool) * (int -> int -> bool)
+    | BoolToBool of (bool -> bool -> bool)
+
 let rec eval_expr (env : value env) (e : expr) : value =
     match e with
     | Lit lit -> VLit lit
@@ -56,20 +61,50 @@ let rec eval_expr (env : value env) (e : expr) : value =
         
         | _ -> unexpected_error "eval_expr: expected closure in rec binding but got: %s" (pretty_value v1)
         // TODO finish this implementation
+    
+    | UnOp ("not", e1) -> 
+        let v = eval_expr env e1 
+        in 
+            match v with 
+            | (VLit (LBool x)) -> VLit (LBool (not x))
+            | _ -> unexpected_error "eval_expr: illegal operand in unary operator: %s" (pretty_value v)
 
-    | BinOp (e1, "+", e2) -> binop (+) (+) env e1 e2
-    | BinOp (e1, "-", e2) -> binop (-) (-) env e1 e2
-    | BinOp (e1, "*", e2) -> binop ( * ) ( * ) env e1 e2
-    // TODO: implement other binary ops
-
+    | BinOp (e1, "+", e2) -> binop (NumToNum ((+), (+))) env e1 e2
+    | BinOp (e1, "*", e2) -> binop (NumToNum (( * ), ( * ))) env e1 e2
+    | BinOp (e1, "-", e2) -> binop (NumToNum ((-), (-))) env e1 e2
+    | BinOp (e1, "/", e2) -> binop (NumToNum ((/), (/))) env e1 e2
+    | BinOp (e1, "%", e2) -> binop (NumToNum ((%), (%))) env e1 e2
+    
+    | BinOp (e1, ">", e2) -> binop (NumToBool ((>), (>))) env e1 e2
+    | BinOp (e1, "<", e2) -> binop (NumToBool ((<), (<))) env e1 e2
+    | BinOp (e1, ">=", e2) -> binop (NumToBool ((>=), (>=))) env e1 e2
+    | BinOp (e1, "<=", e2) -> binop (NumToBool ((<=), (<=))) env e1 e2
+    | BinOp (e1, "<>", e2) -> binop (NumToBool ((<>), (<>))) env e1 e2
+    
+    | BinOp (e1, "and", e2) -> binop (BoolToBool (&&)) env e1 e2
+    | BinOp (e1, "or", e2) -> binop (BoolToBool (||)) env e1 e2
+    
     | _ -> unexpected_error "eval_expr: unsupported expression: %s [AST: %A]" (pretty_expr e) e
 
-and binop op_int op_float env e1 e2 =
+and binop (op_func: opFunction) (env : value env) (e1 : expr) (e2 : expr) : value = 
     let v1 = eval_expr env e1
     let v2 = eval_expr env e2
-    match v1, v2 with
-    | VLit (LInt x), VLit (LInt y) -> VLit (LInt (op_int x y))
-    | VLit (LFloat x), VLit (LFloat y) -> VLit (LFloat (op_float x y))
-    | VLit (LInt x), VLit (LFloat y) -> VLit (LFloat (op_float (float x) y))
-    | VLit (LFloat x), VLit (LInt y) -> VLit (LFloat (op_float x (float y)))
-    | _ -> unexpected_error "eval_expr: illegal operands in binary operator (+): %s + %s" (pretty_value v1) (pretty_value v2)
+    match op_func with
+    | NumToNum(op_float, op_int) -> 
+        match v1, v2 with
+        | VLit (LInt x), VLit (LInt y) -> VLit (LInt (op_int x y))
+        | VLit (LFloat x), VLit (LFloat y) -> VLit (LFloat (op_float x y))
+        | VLit (LInt x), VLit (LFloat y) -> VLit (LFloat (op_float (float x) y))
+        | VLit (LFloat x), VLit (LInt y) -> VLit (LFloat (op_float x (float y)))
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
+    | NumToBool(op_float, op_int) -> 
+        match v1, v2 with
+        | VLit (LInt x), VLit (LInt y) -> VLit (LBool (op_int x y))
+        | VLit (LFloat x), VLit (LFloat y) -> VLit (LBool (op_float x y))
+        | VLit (LInt x), VLit (LFloat y) -> VLit (LBool (op_float (float x) y))
+        | VLit (LFloat x), VLit (LInt y) -> VLit (LBool (op_float x (float y)))
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
+    | BoolToBool(op_bool) -> 
+        match v1, v2 with
+        | VLit (LBool x), VLit (LBool y) -> VLit (LBool (op_bool x y))
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
