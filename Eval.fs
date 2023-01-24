@@ -20,6 +20,9 @@ let rec eval_expr (env : value env) (e : expr) : value =
         let _, v = List.find (fun (y, _) -> x = y) env
         v
 
+    // TODO implement tuple - DONE
+    | Tuple (exprs) -> VTuple (List.map (fun e -> eval_expr env e) exprs)
+
     | Lambda (x, _, e) -> Closure (env, x, e)
 
     | App (e1, e2) ->
@@ -61,7 +64,7 @@ let rec eval_expr (env : value env) (e : expr) : value =
         
         | _ -> unexpected_error "eval_expr: expected closure in rec binding but got: %s" (pretty_value v1)
         // TODO finish this implementation - DONE
-    
+
     // ops DONE
     | UnOp ("not", e1) -> 
         let v = eval_expr env e1 
@@ -69,12 +72,13 @@ let rec eval_expr (env : value env) (e : expr) : value =
             match v with 
             | (VLit (LBool x)) -> VLit (LBool (not x))
             | _ -> unexpected_error "eval_expr: illegal operand in unary operator: %s" (pretty_value v)
+    
     | UnOp ("-", e1) -> 
         let v = eval_expr env e1 
         in 
             match v with 
-            | (VLit (LInt x)) -> VLit (LInt (-1 * x))
-            | (VLit (LFloat x)) -> VLit (LFloat (-1.0 * x))
+            | (VLit (LInt x)) -> VLit (LInt (-x))
+            | (VLit (LFloat x)) -> VLit (LFloat (-x))
             | _ -> unexpected_error "eval_expr: illegal operand in unary operator: %s" (pretty_value v)
 
     | BinOp (e1, "+", e2) -> binop (NumToNum ((+), (+))) env e1 e2
@@ -105,16 +109,16 @@ and binop (op_func: opFunction) (env : value env) (e1 : expr) (e2 : expr) : valu
         | VLit (LFloat x), VLit (LFloat y) -> VLit (LFloat (op_float x y))
         | VLit (LInt x), VLit (LFloat y) -> VLit (LFloat (op_float (float x) y))
         | VLit (LFloat x), VLit (LInt y) -> VLit (LFloat (op_float x (float y)))
-        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s ; %s" (pretty_value v1) (pretty_value v2)
     | NumToBool(op_float, op_int) -> 
         match v1, v2 with
         | VLit (LInt x), VLit (LInt y) -> VLit (LBool (op_int x y))
         | VLit (LFloat x), VLit (LFloat y) -> VLit (LBool (op_float x y))
         | VLit (LInt x), VLit (LFloat y) -> VLit (LBool (op_float (float x) y))
         | VLit (LFloat x), VLit (LInt y) -> VLit (LBool (op_float x (float y)))
-        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s ; %s" (pretty_value v1) (pretty_value v2)
     | BoolToBool(op_bool) -> 
         match v1, v2 with
         | VLit (LBool x), VLit (LBool y) -> VLit (LBool (op_bool x y))
-        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s + %s" (pretty_value v1) (pretty_value v2)
+        | _ -> unexpected_error "eval_expr: illegal operands in binary operator: %s ; %s" (pretty_value v1) (pretty_value v2)
 
