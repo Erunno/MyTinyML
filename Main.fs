@@ -11,11 +11,13 @@ open TinyML.Ast
 
 let parse_from_TextReader rd filename parser = Parsing.parse_from_TextReader SyntaxError rd filename (1, 1) parser Lexer.tokenize Parser.tokenTagToTokenId
     
-let interpret_expr tenv venv e =
+let interpret_expr (tenv : ty env) (venv : value env) e =
     #if DEBUG
     printfn "AST:\t%A\npretty:\t%s" e (pretty_expr e)
     #endif
-    let t = Typing.typecheck_expr tenv e
+    let senv = List.map (fun (n, ty) -> (n, Forall(Set.empty, ty))) tenv
+    //let t = Typing.typecheck_expr tenv e
+    let t,_ = Typing.typeinfer_expr senv e
     #if DEBUG
     printfn "type:\t%s" (pretty_ty t)
     #endif

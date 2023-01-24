@@ -14,11 +14,12 @@ type subst = (tyvar * ty) list
 let max a b = if a > b then a else b
 
 // TODO implement this - DONE
-let rec apply_subst (t : ty) (s : subst) : ty =
+let rec apply_subst (s : subst) (t : ty) : ty =
+    let apply = apply_subst s
     match t with
     | TyName(_) -> t
-    | TyArrow(dom, codom) -> TyArrow(apply_subst dom s,apply_subst codom s)
-    | TyTuple(tuple) -> TyTuple(List.map (fun x -> apply_subst x s) tuple)
+    | TyArrow(dom, codom) -> TyArrow(apply dom,apply codom)
+    | TyTuple(tuple) -> TyTuple(List.map (fun x -> apply x ) tuple)
     | TyVar(v) -> 
         let substituted_type_opt = List.tryFind (fun (var, _) -> var = v) s 
         in
@@ -26,13 +27,20 @@ let rec apply_subst (t : ty) (s : subst) : ty =
             | Some (_, substituted_type) -> substituted_type
             | None -> t
 
+let apply_subs_on_scheme (s : subst) (Forall (tvs, t)) =
+    let relevat_subs = List.filter (fun (tvar, _) -> not (Set.contains tvar tvs)) s
+    Forall (tvs, apply_subst relevat_subs t)
+        
+let apply_subs_on_env (s : subst) (env : scheme env) =
+    List.map (fun (vname, sch) -> (vname, apply_subs_on_scheme s sch)) env
+    
 // TODO implement this - DONE (apart from duplicit domain records - mentioned in lecture 20)
 let rec compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
     match subs_list2 with
     | [] -> subs_list1
     | (sub2 :: remainig_subs2) ->
         let (v2, ty2) = sub2
-        let new_sub_ty2 = apply_subst ty2 subs_list1
+        let new_sub_ty2 = apply_subst subs_list1 ty2 
         in 
             ((v2, new_sub_ty2) :: (compose_subst subs_list1 remainig_subs2))
 
@@ -59,6 +67,7 @@ let freevars_scheme (Forall (tvs, t)) = freevars_ty t - tvs
 let freevars_scheme_env env =
     List.fold (fun r (_, sch) -> r + freevars_scheme sch) Set.empty env
 
+
 // type inference
 //
 
@@ -68,6 +77,9 @@ let gamma0 = [
 
 ]
 
+let list_max l =
+    if l = [] then 0 else List.max l
+
 let rec get_max_var_in_type (t: ty) : tyvar =
     match t with 
     | TyName (_) -> 0
@@ -75,8 +87,11 @@ let rec get_max_var_in_type (t: ty) : tyvar =
     | TyArrow (t1,t2) -> max (get_max_var_in_type t1) (get_max_var_in_type t2)
     | TyTuple (tys) -> List.fold (fun acc t -> max acc (get_max_var_in_type t)) 0 tys
 
+let get_max_var_in_scheme (Forall(tvs, t)) = 
+    max (list_max (Set.toList tvs)) (get_max_var_in_type t)
 
-let get_max_var_in_env (env: scheme env) = List.max (List.map (fun (_, Forall (_, t)) -> get_max_var_in_type t) env)
+let get_max_var_in_env (env: scheme env) = 
+    list_max (List.map (fun (_, sch) -> get_max_var_in_scheme sch) env)
     
 let get_fresh_tyvar (env : scheme env) = 1 + get_max_var_in_env env
 
@@ -96,7 +111,6 @@ let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) =
 let instantiate (env: scheme env) (Forall (tsv, t)) =
     let max_var = get_max_var_in_env env
     List.fold2 (fun res tvar idx -> replace_tyvar tvar (tvar + idx) res) t (Set.toList tsv) (index (Set.count tsv))
-    
 
 // TODO for exam
 let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
@@ -108,7 +122,11 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     | Lit (LChar _) -> TyChar, [] 
     | Lit LUnit -> TyUnit, []
 
-    // | Var (vname) -> 
+    | Var (vname) -> 
+        let scho = List.tryFind (fun (n, _) -> n = vname) env
+        match scho with
+        | None -> TyVar (get_fresh_tyvar env), []
+        | Some (_, sch) -> instantiate env sch, []
 
     | Let (x, tyo, e1, e2) ->
         let t1, s1 = typeinfer_expr env e1
@@ -123,6 +141,22 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         let (lexpr_ty, final_subs) = typeinfer_expr extended_env lexpr
         in 
             (TyArrow(x_type, lexpr_ty), final_subs)
+
+    | BinOp (e1, ("+" | "-" | "/" | "%" | "*"), e2) ->
+        let t1, _ = typeinfer_expr env e1
+        match t1 with
+        | TyFloat ->
+            let sub2 = unify t1 TyFloat 
+            let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
+            let sub3 = unify t2 TyFloat 
+            TyFloat, sub3
+        | _ -> // otherwise it's gonna be int (even if there is are just two variables)
+            let sub2 = unify t1 TyInt
+            let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
+            let sub3 = unify t2 TyInt
+            TyInt, sub3
+
+
 
 
 
