@@ -35,22 +35,25 @@ let rec compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
             ((v2, new_sub_ty2) :: (compose_subst subs_list1 remainig_subs2))
 
 // TODO implement this
-let unify (t1 : ty) (t2 : ty) : subst =
+let rec unify (t1 : ty) (t2 : ty) : subst =
+    let failed_unify t1 t2 = type_error "type error: failed to unify type '%s' and '%s'" (pretty_ty t1) (pretty_ty t2)
     match t1, t2 with
-    | TyName (n1), TyName (n2) -> if n1 = n2 then [] else type_error "type error: failed to unify type %s and %s" n1 n2
-    | TyName (_), TyVar (v2) -> [(v2, t1)]
-    | TyVar (v1), TyName (_) -> [(v1, t2)]
-    // todo 
+    | TyName (n1), TyName (n2) when n1 = n2 -> []
+    | t, TyVar (v) | TyVar (v), t -> [(v, t)]
+    | TyArrow (dom1, codom1), TyArrow (dom2, codom2) -> compose_subst (unify dom1 dom2) (unify codom1 codom2)
+    | _ -> failed_unify t1 t2
 
-let rec freevars_ty (t : ty) : tyvar Set =
+let rec freevars_ty t =
     match t with
-    | TyName _ -> Set.empty
-    | TyArrow (t1, t2) -> Set.union (freevars_ty t1) (freevars_ty t2)
+    | TyName s -> Set.empty
+    | TyArrow (t1, t2) -> (freevars_ty t1) + (freevars_ty t2)
     | TyVar tv -> Set.singleton tv
-    | TyTuple ts -> List.fold (fun set t -> Set.union set (freevars_ty t)) Set.empty ts 
+    | TyTuple ts -> List.fold (fun r t -> r + freevars_ty t) Set.empty ts
 
-let freevars_scheme (Forall (tvs, t)) =
-    Set.difference (freevars_ty t) (Set.ofList tvs)
+let freevars_scheme (Forall (tvs, t)) = freevars_ty t - tvs
+
+let freevars_scheme_env env =
+    List.fold (fun r (_, sch) -> r + freevars_scheme sch) Set.empty env
 
 // type inference
 //
@@ -61,9 +64,33 @@ let gamma0 = [
 
 ]
 
+//let get_fresh_tyvar (env : scheme env) =
+    
+
 // TODO for exam
 let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
-    failwith "not implemented"
+    match e with
+    | Lit (LInt _) -> TyInt, [] 
+    | Lit (LBool _) -> TyBool, []
+    | Lit (LFloat _) -> TyFloat, [] 
+    | Lit (LString _) -> TyString, []
+    | Lit (LChar _) -> TyChar, [] 
+    | Lit LUnit -> TyUnit, []
+
+    | Let (x, tyo, e1, e2) ->
+        let t1, s1 = typeinfer_expr env e1
+        let tvs = freevars_ty t1 - freevars_scheme_env env
+        let sch = Forall (tvs, t1)
+        let t2, s2 = typeinfer_expr ((x, sch) :: env) e2
+        t2, compose_subst s2 s1
+
+    | Lambda (x, None, lexpr) -> // todo needs to be verified
+        let x_type = TyVar 1 // todo get fresh var
+        let extended_env = (x, (Forall(Set.empty, x_type))) :: env
+        let (lexpr_ty, final_subs) = typeinfer_expr extended_env lexpr
+        in 
+            (TyArrow(x_type, lexpr_ty), final_subs)
+
 
 
 // type checker
