@@ -11,6 +11,8 @@ let type_error fmt = throw_formatted TypeError fmt
 
 type subst = (tyvar * ty) list
 
+let max a b = if a > b then a else b
+
 // TODO implement this - DONE
 let rec apply_subst (t : ty) (s : subst) : ty =
     match t with
@@ -36,12 +38,14 @@ let rec compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
 
 // TODO implement this
 let rec unify (t1 : ty) (t2 : ty) : subst =
-    let failed_unify t1 t2 = type_error "type error: failed to unify type '%s' and '%s'" (pretty_ty t1) (pretty_ty t2)
     match t1, t2 with
     | TyName (n1), TyName (n2) when n1 = n2 -> []
     | t, TyVar (v) | TyVar (v), t -> [(v, t)]
     | TyArrow (dom1, codom1), TyArrow (dom2, codom2) -> compose_subst (unify dom1 dom2) (unify codom1 codom2)
-    | _ -> failed_unify t1 t2
+    | TyTuple(tup1) , TyTuple(tup2) when List.length tup1 = List.length tup2 
+        -> List.fold2 (fun acc it1 it2 -> compose_subst acc (unify it1 it2)) [] tup1 tup2
+
+    | _ -> type_error "type error: failed to unify type '%s' and '%s'" (pretty_ty t1) (pretty_ty t2)
 
 let rec freevars_ty t =
     match t with
@@ -64,7 +68,34 @@ let gamma0 = [
 
 ]
 
-//let get_fresh_tyvar (env : scheme env) =
+let rec get_max_var_in_type (t: ty) : tyvar =
+    match t with 
+    | TyName (_) -> 0
+    | TyVar (var) -> var
+    | TyArrow (t1,t2) -> max (get_max_var_in_type t1) (get_max_var_in_type t2)
+    | TyTuple (tys) -> List.fold (fun acc t -> max acc (get_max_var_in_type t)) 0 tys
+
+
+let get_max_var_in_env (env: scheme env) = List.max (List.map (fun (_, Forall (_, t)) -> get_max_var_in_type t) env)
+    
+let get_fresh_tyvar (env : scheme env) = 1 + get_max_var_in_env env
+
+let rec index num = 
+    match num with 
+    | 0 -> []
+    | _ -> (num :: index (num-1))
+
+let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) = 
+    let replace = replace_tyvar oldv newv
+    match ty with 
+    | TyName(_) -> ty
+    | TyVar(v) -> if v = oldv then TyVar(newv) else TyVar(oldv)
+    | TyArrow(dom, codom) -> TyArrow(replace dom, replace codom)
+    | TyTuple(ts) -> TyTuple (List.map (fun t -> replace t) ts)
+
+let instantiate (env: scheme env) (Forall (tsv, t)) =
+    let max_var = get_max_var_in_env env
+    List.fold2 (fun res tvar idx -> replace_tyvar tvar (tvar + idx) res) t (Set.toList tsv) (index (Set.count tsv))
     
 
 // TODO for exam
@@ -77,6 +108,8 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     | Lit (LChar _) -> TyChar, [] 
     | Lit LUnit -> TyUnit, []
 
+    // | Var (vname) -> 
+
     | Let (x, tyo, e1, e2) ->
         let t1, s1 = typeinfer_expr env e1
         let tvs = freevars_ty t1 - freevars_scheme_env env
@@ -85,7 +118,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         t2, compose_subst s2 s1
 
     | Lambda (x, None, lexpr) -> // todo needs to be verified
-        let x_type = TyVar 1 // todo get fresh var
+        let x_type = TyVar (get_max_var_in_env env) 
         let extended_env = (x, (Forall(Set.empty, x_type))) :: env
         let (lexpr_ty, final_subs) = typeinfer_expr extended_env lexpr
         in 
