@@ -12,6 +12,7 @@ let type_error fmt = throw_formatted TypeError fmt
 type subst = (tyvar * ty) list
 
 let max a b = if a > b then a else b
+let list_max l = if l = [] then 0 else List.max l
 
 // TODO implement this - DONE
 let rec apply_subst (s : subst) (t : ty) : ty =
@@ -22,36 +23,59 @@ let rec apply_subst (s : subst) (t : ty) : ty =
     | TyTuple(tuple) -> TyTuple(List.map (fun x -> apply x ) tuple)
     | TyVar(v) -> 
         let substituted_type_opt = List.tryFind (fun (var, _) -> var = v) s 
-        in
-            match substituted_type_opt with 
-            | Some (_, substituted_type) -> substituted_type
-            | None -> t
+        match substituted_type_opt with 
+        | Some (_, substituted_type) -> substituted_type
+        | None -> t
 
 let apply_subs_on_scheme (s : subst) (Forall (tvs, t)) =
-    let relevat_subs = List.filter (fun (tvar, _) -> not (Set.contains tvar tvs)) s
-    Forall (tvs, apply_subst relevat_subs t)
+    let relevant_subs = List.filter (fun (tvar, _) -> not (Set.contains tvar tvs)) s
+    Forall (tvs, apply_subst relevant_subs t)
         
 let apply_subs_on_env (s : subst) (env : scheme env) =
     List.map (fun (vname, sch) -> (vname, apply_subs_on_scheme s sch)) env
+
+let assert_same_variable_diffrent_mapping (subs_list1 : subst) (subs_list2 : subst) =
+    let assert_one (tvar, t1) =
+        let same_var_sub = List.tryFind (fun (v, _) -> v = tvar) subs_list2
+        match (same_var_sub) with
+        | None -> ()
+        | Some (_, t2) when t1 = t2 -> ()
+        | Some (v, t2) -> type_error "type error: inconsistent substitution %s ~~> %s and %s ~~> %s" (pretty_ty (TyVar tvar)) (pretty_ty t1) (pretty_ty (TyVar v)) (pretty_ty t2)
+    List.fold (fun _ sub -> assert_one sub) () subs_list1
+
+let assert_argument_is_not_in_sub_result (subs_list : subst) =
+    let rec assert_var_appears_in_type (original_type : ty) (var : tyvar) (t : ty) = 
+        let assert_rec = List.fold (fun _ ty -> assert_var_appears_in_type original_type var ty) ()
+        match t with
+        | TyName _ -> ()
+        | TyVar v when v <> var -> ()
+        | TyArrow (dom, codom) -> assert_rec [dom; codom]
+        | TyTuple tys -> assert_rec tys
+        | _ -> type_error "type error: found recursive substitution %s ~~> %s" (pretty_ty (TyVar var)) (pretty_ty original_type)
     
-// TODO implement this - DONE (apart from duplicit domain records - mentioned in lecture 20)
-let rec compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
-    match subs_list2 with
-    | [] -> subs_list1
-    | (sub2 :: remainig_subs2) ->
-        let (v2, ty2) = sub2
-        let new_sub_ty2 = apply_subst subs_list1 ty2 
-        in 
-            ((v2, new_sub_ty2) :: (compose_subst subs_list1 remainig_subs2))
+    let _ = List.fold (fun _ (var, ty) -> assert_var_appears_in_type ty var ty) () subs_list
+    ()
+
+// TODO implement this - DONE (lecture 20)
+let compose_subst (subs_list1 : subst) (subs_list2 : subst) : subst =
+    let _ = assert_same_variable_diffrent_mapping subs_list1 subs_list2
+
+    let apply_subs1 = apply_subst subs_list1
+    let result = List.fold (fun final_subs (var2, t2) -> ((var2, apply_subs1 t2) :: final_subs)) subs_list1 subs_list2
+    
+    let _ = assert_argument_is_not_in_sub_result result
+    result
+
+let rec compose_more_subst (subs: subst list) = List.foldBack (fun s acc -> compose_subst s acc) subs [] 
 
 // TODO implement this
 let rec unify (t1 : ty) (t2 : ty) : subst =
+    if t1 = t2 then [] else
     match t1, t2 with
-    | TyName (n1), TyName (n2) when n1 = n2 -> []
     | t, TyVar (v) | TyVar (v), t -> [(v, t)]
     | TyArrow (dom1, codom1), TyArrow (dom2, codom2) -> compose_subst (unify dom1 dom2) (unify codom1 codom2)
     | TyTuple(tup1) , TyTuple(tup2) when List.length tup1 = List.length tup2 
-        -> List.fold2 (fun acc it1 it2 -> compose_subst acc (unify it1 it2)) [] tup1 tup2
+        -> List.fold2 (fun acc it1 it2 -> unify it1 it2 |> compose_subst acc) [] tup1 tup2
 
     | _ -> type_error "type error: failed to unify type '%s' and '%s'" (pretty_ty t1) (pretty_ty t2)
 
@@ -77,9 +101,6 @@ let gamma0 = [
 
 ]
 
-let list_max l =
-    if l = [] then 0 else List.max l
-
 let rec get_max_var_in_type (t: ty) : tyvar =
     match t with 
     | TyName (_) -> 0
@@ -93,7 +114,7 @@ let get_max_var_in_scheme (Forall(tvs, t)) =
 let get_max_var_in_env (env: scheme env) = 
     list_max (List.map (fun (_, sch) -> get_max_var_in_scheme sch) env)
     
-let get_fresh_tyvar (env : scheme env) = 1 + get_max_var_in_env env
+let get_fresh_tyvar_in (env : scheme env) = TyVar ( 1 + get_max_var_in_env env)
 
 let rec index num = 
     match num with 
@@ -125,7 +146,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     | Var (vname) -> 
         let scho = List.tryFind (fun (n, _) -> n = vname) env
         match scho with
-        | None -> TyVar (get_fresh_tyvar env), []
+        | None -> get_fresh_tyvar_in env, []
         | Some (_, sch) -> instantiate env sch, []
 
     | Let (x, tyo, e1, e2) ->
@@ -133,28 +154,62 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         let tvs = freevars_ty t1 - freevars_scheme_env env
         let sch = Forall (tvs, t1)
         let t2, s2 = typeinfer_expr ((x, sch) :: env) e2
+        let _ = match tyo with
+                | Some ty -> unify ty t2 // just test if it can be unified
+                | None -> []
         t2, compose_subst s2 s1
 
-    | Lambda (x, None, lexpr) -> // todo needs to be verified
-        let x_type = TyVar (get_max_var_in_env env) 
-        let extended_env = (x, (Forall(Set.empty, x_type))) :: env
-        let (lexpr_ty, final_subs) = typeinfer_expr extended_env lexpr
-        in 
-            (TyArrow(x_type, lexpr_ty), final_subs)
+    | Lambda (x, None, lexpr) ->
+        let fresh_var = get_fresh_tyvar_in env 
+        let extended_env = (x, (Forall(Set.empty, fresh_var))) :: env
+        let codom, final_subs = typeinfer_expr extended_env lexpr
+        let dom = apply_subst final_subs fresh_var
+        
+        TyArrow(dom, codom), final_subs
+
+    | App (e1, e2) -> 
+        let t1, s1 = typeinfer_expr env e1
+        let t2, s2 = typeinfer_expr (apply_subs_on_env s1 env) e2
+        let fresh_var = get_fresh_tyvar_in env
+        let s3 = unify t1 (TyArrow (t2, fresh_var))
+        apply_subst s3 fresh_var, compose_subst s3 s2
+
+    | Tuple (es) ->
+        let fold_func (e : expr) ((types, acc_sub) : (ty list * subst)) = 
+            let t, s = typeinfer_expr (apply_subs_on_env acc_sub env) e in ((t::types), compose_subst s acc_sub)
+        let (types, final_sub) = List.foldBack fold_func es ([], [])
+        TyTuple types, final_sub
 
     | BinOp (e1, ("+" | "-" | "/" | "%" | "*"), e2) ->
-        let t1, _ = typeinfer_expr env e1
-        match t1 with
-        | TyFloat ->
-            let sub2 = unify t1 TyFloat 
-            let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
-            let sub3 = unify t2 TyFloat 
-            TyFloat, sub3
-        | _ -> // otherwise it's gonna be int (even if there is are just two variables)
-            let sub2 = unify t1 TyInt
-            let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
-            let sub3 = unify t2 TyInt
-            TyInt, sub3
+        let t1, s1 = typeinfer_expr env e1
+        let _t2, _s2 = typeinfer_expr env e2 
+        
+        let num_type =
+            match (t1, _t2) with
+            | (TyFloat, _) | (_, TyFloat) -> TyFloat
+            | _ -> TyInt
+
+        let s2 = unify t1 num_type
+        let t2, s3 = typeinfer_expr (apply_subs_on_env s2 env) e2
+        let s4 = unify t2 num_type
+        num_type, compose_more_subst [s4; s3; s2; s1]
+
+
+
+        //let t1, _ = typeinfer_expr env e1
+        //match t1 with
+        //| TyFloat ->
+        //    let sub2 = unify t1 TyFloat 
+        //    let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
+        //    let sub3 = unify t2 TyFloat 
+        //    TyFloat, sub3
+        //| _ -> // otherwise it's gonna be int (even if there is are just two variables)
+        //    let sub2 = unify t1 TyInt
+        //    let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
+        //    let sub3 = unify t2 TyInt
+        //    TyInt, sub3
+
+    | expr -> failwithf "node '%s' is not implemented" (pretty_expr expr)
 
 
 
