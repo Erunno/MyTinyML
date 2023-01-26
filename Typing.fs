@@ -34,6 +34,8 @@ let apply_subs_on_scheme (s : subst) (Forall (tvs, t)) =
 let apply_subs_on_env (s : subst) (env : scheme env) =
     List.map (fun (vname, sch) -> (vname, apply_subs_on_scheme s sch)) env
 
+let apply_subst_on_list (s : subst) (ts : ty list) = List.map (apply_subst s) ts 
+
 let assert_same_variable_diffrent_mapping (subs_list1 : subst) (subs_list2 : subst) =
     let assert_one (tvar, t1) =
         let same_var_sub = List.tryFind (fun (v, _) -> v = tvar) subs_list2
@@ -119,10 +121,7 @@ let get_max_var_in_env (env: scheme env) =
     
 let get_fresh_tyvar_in (env : scheme env) = TyVar ( 1 + get_max_var_in_env env)
 
-let rec index num = 
-    match num with 
-    | 0 -> []
-    | _ -> (num :: index (num-1))
+let rec seq num = if num = 0 then [] else (num :: seq (num-1))
 
 let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) = 
     let replace = replace_tyvar oldv newv
@@ -132,9 +131,9 @@ let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) =
     | TyArrow(dom, codom) -> TyArrow(replace dom, replace codom)
     | TyTuple(ts) -> TyTuple (List.map (fun t -> replace t) ts)
 
-let instantiate (env: scheme env) (Forall (tsv, t)) = // todo check
+let instantiate (env: scheme env) (Forall (tvs, t)) =
     let max_var = get_max_var_in_env env
-    List.fold2 (fun res tvar idx -> replace_tyvar tvar (tvar + idx) res) t (Set.toList tsv) (index (Set.count tsv))
+    List.fold2 (fun res tvar idx -> replace_tyvar tvar (idx + max_var) res) t (Set.toList tvs) (seq (Set.count tvs))
 
 // TODO for exam
 let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
@@ -149,8 +148,8 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     | Var (vname) -> 
         let scho = List.tryFind (fun (n, _) -> n = vname) env
         match scho with
-        | None -> get_fresh_tyvar_in env, []
         | Some (_, sch) -> instantiate env sch, []
+        | None ->  type_error "type error: variable %s not found" vname
 
     | Let (x, tyo, e1, e2) ->
         let t1, s1 = typeinfer_expr env e1
@@ -178,7 +177,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
         match final_ty with
         | TyArrow _ -> ()
-        | _ -> type_error "type error: expected arrow '%s' to be arrow type but got '%s'" (f) (pretty_ty t2)
+        | _ -> type_error "type error: expected '%s' to be arrow type but got '%s'" (f) (pretty_ty t2)
 
         final_ty, compose_more_subst [s3;s2;s1]
 
@@ -221,13 +220,15 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         let fresh_var = get_fresh_tyvar_in env
         let s3 = unify t1 (TyArrow (t2, fresh_var))
 
-        apply_subst s3 fresh_var, compose_subst s3 s2
+        apply_subst s3 fresh_var, compose_more_subst [s3;s2;s1]
 
     | Tuple (es) ->
         let fold_func (e : expr) ((types, acc_sub) : (ty list * subst)) = 
-            let t, s = typeinfer_expr (apply_subs_on_env acc_sub env) e in ((t::types), compose_subst s acc_sub)
-        let (types, final_sub) = List.foldBack fold_func es ([], [])
-        TyTuple types, final_sub
+            let t, s = typeinfer_expr (apply_subs_on_env acc_sub env) e 
+            ((t::types), compose_subst s acc_sub)
+
+        let types, final_sub = List.foldBack fold_func es ([], [])
+        TyTuple (apply_subst_on_list final_sub (List.rev types)), final_sub
 
     | BinOp (e1, ("+" | "-" | "/" | "%" | "*"), e2) ->
         let t1, _ = typeinfer_expr env e1
@@ -249,7 +250,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
     | BinOp (e1, ("and" | "or"), e2) ->
         bin_op TyBool TyBool env e1 e2
-
+    
     | UnOp ("-", e1) -> 
         let t1, s1 = typeinfer_expr env e1
         let num_type = 
@@ -267,6 +268,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
     // these two cases won't ever happen -> it would be caught during parsing
     | BinOp (_, op, _) | UnOp (op, _) -> failwithf "unknow operator %s" op
+    | LetIn(_, _) -> failwithf "unknow let in"
 
 and bin_op (dom_type : ty) (codom_type : ty) (env : scheme env) (e1: expr) (e2 : expr) =
     let t1, s1 = typeinfer_expr env e1
