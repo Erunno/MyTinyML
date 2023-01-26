@@ -118,12 +118,35 @@ let pretty_env p env = sprintf "[%s]" (flatten (fun (x, o) -> sprintf "%s=%s" x 
 // print any tuple given a printer p for its elements
 let pretty_tupled p l = flatten p ", " l
 
-let rec pretty_ty t =
-    match t with
-    | TyName s -> s
-    | TyArrow (t1, t2) -> sprintf "%s -> %s" (pretty_ty t1) (pretty_ty t2)
-    | TyVar n -> sprintf "'%d" n
-    | TyTuple ts -> sprintf "(%s)" (pretty_tupled pretty_ty ts)
+type map = (tyvar * char) list
+
+let get_next_tyname (names : char list) = 
+    match names with 
+    | [] -> 'a'
+    | _ -> char (1 + List.max (List.map int names))
+
+let pretty_ty (t : ty) =
+    let get_var_name (mapings : map) (var : tyvar) : (map * char) =
+        let maping = List.tryFind (fun (v, _) -> v = var) mapings
+        match maping with
+        | Some (_, vname) -> mapings, vname
+        | None -> let vname = get_next_tyname (List.map (fun (_, vname) -> vname) mapings) in ((var, vname) :: mapings), vname
+
+    let rec pretty_type_internal (mapings : map) (t : ty) : (map * string) = 
+        match t with
+        | TyName s -> mapings, s
+        | TyArrow (t1, t2) -> 
+            let m1, s1 = pretty_type_internal mapings t1
+            let m2, s2 = pretty_type_internal m1 t2 
+            m1 @ m2, sprintf "%s -> %s" s1 s2
+        | TyVar n ->
+            let m, vname = get_var_name mapings n
+            m, sprintf "'%c" vname  
+        | TyTuple ts -> 
+            let m, arr = List.fold (fun (m_a, ch_a) ty -> let m, ch = pretty_type_internal m_a ty in m @ m_a, ch :: ch_a) (mapings, []) ts
+            m, sprintf "(%s)" (pretty_tupled (sprintf "%s") arr)
+    let _, res = pretty_type_internal [] t
+    res
 
 let pretty_lit lit =
     match lit with

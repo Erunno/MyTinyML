@@ -266,8 +266,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         TyBool, compose_subst s2 s1
 
     // these two cases won't ever happen -> it would be caught during parsing
-    | BinOp (_, op, _) -> failwithf "unknow operator %s" op
-    | UnOp (op, _) -> failwithf "unknow operator %s" op
+    | BinOp (_, op, _) | UnOp (op, _) -> failwithf "unknow operator %s" op
 
 and bin_op (dom_type : ty) (codom_type : ty) (env : scheme env) (e1: expr) (e2 : expr) =
     let t1, s1 = typeinfer_expr env e1
