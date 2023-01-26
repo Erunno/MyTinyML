@@ -91,6 +91,9 @@ let freevars_scheme (Forall (tvs, t)) = freevars_ty t - tvs
 let freevars_scheme_env env =
     List.fold (fun r (_, sch) -> r + freevars_scheme sch) Set.empty env
 
+let gen_sch (env : scheme env) (ty : ty) : scheme =
+    let tvs = freevars_ty ty - freevars_scheme_env env
+    Forall (tvs, ty)
 
 // type inference
 //
@@ -151,8 +154,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
     | Let (x, tyo, e1, e2) ->
         let t1, s1 = typeinfer_expr env e1
-        let tvs = freevars_ty t1 - freevars_scheme_env env
-        let sch = Forall (tvs, t1)
+        let sch = gen_sch env t1
         let t2, s2 = typeinfer_expr ((x, sch) :: env) e2
         let s3 = 
             match tyo with
@@ -161,6 +163,44 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         
         apply_subst s3 t2, compose_more_subst [s3;s2;s1]
 
+    | LetRec (f, tyo, lambda, e2) ->
+        let extended_env = (f, Forall (Set.empty, get_fresh_tyvar_in env)) :: env
+        let t1, s1 = typeinfer_expr extended_env lambda
+        let f_sch = gen_sch env t1
+        let env_for_e2 = (f, f_sch) :: (apply_subs_on_env s1 env)
+        let t2, s2 = typeinfer_expr env_for_e2 e2
+
+        let s3 = 
+            match tyo with
+            | None -> []
+            | Some ty -> unify ty t2
+        let final_ty = apply_subst s3 t2
+
+        match final_ty with
+        | TyArrow _ -> ()
+        | _ -> type_error "type error: expected arrow '%s' to be arrow type but got '%s'" (f) (pretty_ty t2)
+
+        final_ty, compose_more_subst [s3;s2;s1]
+
+    | IfThenElse (e1, e2, e3o) ->
+        match e3o with
+        | Some e3 -> 
+            let t1, s1 = typeinfer_expr env e1
+            let s2 = unify t1 TyBool
+            let s3 = compose_subst s2 s1
+            let t2, s4 = typeinfer_expr (apply_subs_on_env s3 env) e2
+            let s5 = compose_subst s4 s3
+            let t3, s6 = typeinfer_expr (apply_subs_on_env s5 env) e3
+            let s7 = compose_subst s6 s5
+            let s8 = unify (apply_subst s7 t2) (apply_subst s7 t3)
+            let final_subs = compose_subst s8 s7
+
+            apply_subst final_subs t2, final_subs
+
+
+        | None -> failwithf "node '%s' is not implemented" (pretty_expr e)
+
+    
     | Lambda (x, tyo, lexpr) ->
         let x_ty = 
             match tyo with 
@@ -187,36 +227,34 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         TyTuple types, final_sub
 
     | BinOp (e1, ("+" | "-" | "/" | "%" | "*"), e2) ->
-        let t1, s1 = typeinfer_expr env e1
-        let _t2, _s2 = typeinfer_expr env e2 
-        
-        let num_type =
-            match (t1, _t2) with
+        let t1, _ = typeinfer_expr env e1
+        let t2, _ = typeinfer_expr env e2 
+        let dom_ty = 
+            match t1, t2 with 
             | (TyFloat, _) | (_, TyFloat) -> TyFloat
             | _ -> TyInt
+        bin_op dom_ty dom_ty env e1 e2
 
-        let s2 = unify t1 num_type
-        let t2, s3 = typeinfer_expr (apply_subs_on_env s2 env) e2
-        let s4 = unify t2 num_type
-        num_type, compose_more_subst [s4; s3; s2; s1]
+    | BinOp (e1, ("<" | "<=" | ">" | ">=" | "=" | "<>"), e2) ->
+        let t1, _ = typeinfer_expr env e1
+        let t2, _ = typeinfer_expr env e2 
+        let dom_ty = 
+            match t1, t2 with 
+            | (TyFloat, _) | (_, TyFloat) -> TyFloat
+            | _ -> TyInt
+        bin_op dom_ty TyBool env e1 e2
 
+    | BinOp (e1, ("and" | "or"), e2) ->
+        bin_op TyBool TyBool env e1 e2
 
+    | _ -> failwithf "node '%s' is not implemented" (pretty_expr e)
 
-        //let t1, _ = typeinfer_expr env e1
-        //match t1 with
-        //| TyFloat ->
-        //    let sub2 = unify t1 TyFloat 
-        //    let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
-        //    let sub3 = unify t2 TyFloat 
-        //    TyFloat, sub3
-        //| _ -> // otherwise it's gonna be int (even if there is are just two variables)
-        //    let sub2 = unify t1 TyInt
-        //    let t2, _  = typeinfer_expr (apply_subs_on_env sub2 env) e2
-        //    let sub3 = unify t2 TyInt
-        //    TyInt, sub3
-
-    | expr -> failwithf "node '%s' is not implemented" (pretty_expr expr)
-
+and bin_op (dom_type : ty) (codom_type : ty) (env : scheme env) (e1: expr) (e2 : expr) =
+    let t1, s1 = typeinfer_expr env e1
+    let s2 = unify t1 dom_type
+    let t2, s3 = typeinfer_expr (apply_subs_on_env s2 env) e2
+    let s4 = unify t2 dom_type
+    codom_type, compose_more_subst [s4; s3; s2; s1]
 
 
 
