@@ -132,7 +132,7 @@ let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) =
     | TyArrow(dom, codom) -> TyArrow(replace dom, replace codom)
     | TyTuple(ts) -> TyTuple (List.map (fun t -> replace t) ts)
 
-let instantiate (env: scheme env) (Forall (tsv, t)) =
+let instantiate (env: scheme env) (Forall (tsv, t)) = // todo check
     let max_var = get_max_var_in_env env
     List.fold2 (fun res tvar idx -> replace_tyvar tvar (tvar + idx) res) t (Set.toList tsv) (index (Set.count tsv))
 
@@ -183,13 +183,14 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         final_ty, compose_more_subst [s3;s2;s1]
 
     | IfThenElse (e1, e2, e3o) ->
+        let t1, s1 = typeinfer_expr env e1
+        let s2 = unify t1 TyBool
+        let s3 = compose_subst s2 s1
+        let t2, s4 = typeinfer_expr (apply_subs_on_env s3 env) e2
+        let s5 = compose_subst s4 s3
+        
         match e3o with
         | Some e3 -> 
-            let t1, s1 = typeinfer_expr env e1
-            let s2 = unify t1 TyBool
-            let s3 = compose_subst s2 s1
-            let t2, s4 = typeinfer_expr (apply_subs_on_env s3 env) e2
-            let s5 = compose_subst s4 s3
             let t3, s6 = typeinfer_expr (apply_subs_on_env s5 env) e3
             let s7 = compose_subst s6 s5
             let s8 = unify (apply_subst s7 t2) (apply_subst s7 t3)
@@ -197,9 +198,11 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
             apply_subst final_subs t2, final_subs
 
-
-        | None -> failwithf "node '%s' is not implemented" (pretty_expr e)
-
+        | None ->
+            let s6 = unify TyUnit t2
+            let final_subs = compose_subst s6 s5
+            
+            apply_subst final_subs t2, final_subs
     
     | Lambda (x, tyo, lexpr) ->
         let x_ty = 
@@ -246,6 +249,21 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
 
     | BinOp (e1, ("and" | "or"), e2) ->
         bin_op TyBool TyBool env e1 e2
+
+    | UnOp ("-", e1) -> 
+        let t1, s1 = typeinfer_expr env e1
+        let num_type = 
+            match t1 with
+            | TyFloat -> TyFloat
+            | _ -> TyInt
+        
+        let s2 = unify num_type t1
+        num_type, compose_subst s2 s1
+
+    | UnOp ("not", e1) -> 
+        let t1, s1 = typeinfer_expr env e1
+        let s2 = unify TyBool t1
+        TyBool, compose_subst s2 s1
 
     | _ -> failwithf "node '%s' is not implemented" (pretty_expr e)
 
