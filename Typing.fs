@@ -162,22 +162,22 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
         apply_subst s3 t2, compose_more_subst [s3;s2;s1]
 
     | Lambda (x, tyo, lexpr) ->
-        let fresh_var = get_fresh_tyvar_in env 
-        let extended_env = (x, (Forall(Set.empty, fresh_var))) :: env
+        let x_ty = 
+            match tyo with 
+            | None -> get_fresh_tyvar_in env
+            | Some ty -> ty 
+        let extended_env = (x, (Forall(Set.empty, x_ty))) :: env
         let codom, final_subs = typeinfer_expr extended_env lexpr
-        let dom = apply_subst final_subs fresh_var
-        let explicit_type_subs = 
-            match tyo with
-            | Some ty -> unify ty dom
-            | None -> []
+        let dom = apply_subst final_subs x_ty
 
-        apply_subst explicit_type_subs (TyArrow(dom, codom)), compose_subst explicit_type_subs final_subs
+        TyArrow(dom, codom), final_subs
 
     | App (e1, e2) -> 
         let t1, s1 = typeinfer_expr env e1
         let t2, s2 = typeinfer_expr (apply_subs_on_env s1 env) e2
         let fresh_var = get_fresh_tyvar_in env
         let s3 = unify t1 (TyArrow (t2, fresh_var))
+
         apply_subst s3 fresh_var, compose_subst s3 s2
 
     | Tuple (es) ->
