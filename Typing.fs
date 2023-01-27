@@ -127,7 +127,7 @@ let rec replace_tyvar (oldv:tyvar) (newv:tyvar) (ty:ty) =
     let replace = replace_tyvar oldv newv
     match ty with 
     | TyName(_) -> ty
-    | TyVar(v) -> if v = oldv then TyVar(newv) else TyVar(oldv)
+    | TyVar(v) -> if v = oldv then TyVar(newv) else ty
     | TyArrow(dom, codom) -> TyArrow(replace dom, replace codom)
     | TyTuple(ts) -> TyTuple (List.map (fun t -> replace t) ts)
 
