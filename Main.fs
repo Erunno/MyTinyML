@@ -15,7 +15,7 @@ let interpret_expr (tenv : ty env) (venv : value env) e =
     #if DEBUG
     printfn "AST:\t%A\npretty:\t%s" e (pretty_expr e)
     #endif
-    let senv = List.map (fun (n, ty) -> (n, Forall(Set.empty, ty))) tenv
+    let senv = List.map (fun (n, ty) -> (n, Forall(Typing.freevars_ty ty, ty))) tenv
     //let t = Typing.typecheck_expr tenv e
     let t,_ = Typing.typeinfer_expr senv e
     #if DEBUG
